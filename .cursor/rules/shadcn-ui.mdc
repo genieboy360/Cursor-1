@@ -1,0 +1,70 @@
+---
+alwaysApply: true
+description: shadcn UI configuration and usage guidelines for this Next.js project
+---
+
+# shadcn UI Project Configuration
+
+This project uses **shadcn UI** for all UI elements and components. shadcn UI provides beautifully designed, accessible components built with Radix UI and Tailwind CSS.
+
+## Initial Setup
+
+If shadcn UI is not yet initialized in this project, run the following command in the [my-nextjs-app](mdc:my-nextjs-app) directory:
+
+```bash
+npx shadcn@latest init
+```
+
+This will:
+- Create a `components.json` configuration file
+- Set up the proper directory structure for components
+- Install necessary dependencies
+- Configure Tailwind CSS integration
+
+## Project Structure
+
+After initialization, the project structure will include:
+- `components.json` - shadcn UI configuration
+- `src/components/ui/` - Auto-generated shadcn UI components
+- `src/lib/utils.ts` - Utility functions (including `cn` helper)
+
+## Adding Components
+
+To add new shadcn UI components, use:
+
+```bash
+npx shadcn@latest add [component-name]
+```
+
+Examples:
+```bash
+npx shadcn@latest add button
+npx shadcn@latest add card
+npx shadcn@latest add dialog
+npx shadcn@latest add form
+```
+
+## Usage Guidelines
+
+1. **Import components** from `@/components/ui/[component-name]`
+2. **Use the `cn` utility** from `@/lib/utils` for conditional className merging
+3. **Follow shadcn patterns** for component composition and customization
+4. **Prefer shadcn components** over custom UI implementations
+
+## Key Files
+
+- [package.json](mdc:my-nextjs-app/package.json) - Project dependencies
+- [tailwind.config.js](mdc:my-nextjs-app/tailwind.config.js) - Tailwind configuration (created after init)
+- [globals.css](mdc:my-nextjs-app/src/app/globals.css) - Global styles including shadcn base styles
+
+## Component Development
+
+When creating custom components:
+1. Extend existing shadcn UI components when possible
+2. Use Tailwind CSS for styling
+3. Follow the established patterns in `src/components/ui/`
+4. Ensure accessibility by leveraging Radix UI primitives
+
+## TypeScript Integration
+
+This project uses TypeScript. shadcn UI components come with full TypeScript support and proper type definitions.

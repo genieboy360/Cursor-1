@@ -1,0 +1,194 @@
+---
+alwaysApply: true
+description: Data handling patterns and architecture guidelines for Next.js application
+---
+
+# Data Handling Architecture Guidelines
+
+This project follows strict architectural patterns for data handling to ensure consistency, type safety, and proper separation of concerns.
+
+## Core Principles
+
+### 1. Data Retrieval - Server Components Only
+
+**ALL data retrieval must be performed in Server Components.**
+
+- Use Server Components for fetching data from the database
+- Never fetch data in Client Components
+- Leverage Next.js App Router's native server-side rendering capabilities
+- Database queries should be performed directly in Server Components
+
+```tsx
+// ✅ CORRECT - Server Component data fetching
+export default async function PostsPage() {
+  const posts = await db.select().from(posts).execute();
+  
+  return (
+    <div>
+      {posts.map(post => <PostCard key={post.id} post={post} />)}
+    </div>
+  );
+}
+
+// ❌ INCORRECT - Client Component data fetching
+"use client";
+export default function PostsPage() {
+  const [posts, setPosts] = useState([]);
+  
+  useEffect(() => {
+    fetch('/api/posts').then(/* ... */); // Don't do this
+  }, []);
+}
+```
+
+### 2. Data Mutations - Server Actions Only
+
+**ALL database updates, deletes, and inserts must be performed via Server Actions.**
+
+- Use the `"use server"` directive for all mutation functions
+- Server Actions should be placed in separate files or at the top of Server Components
+- Never perform mutations directly in Client Components
+- Always return appropriate response data from Server Actions
+
+```tsx
+// ✅ CORRECT - Server Action for mutations
+"use server";
+
+export async function createPost(data: CreatePostInput) {
+  const validatedData = createPostSchema.parse(data);
+  
+  const result = await db.insert(posts).values(validatedData).execute();
+  
+  revalidatePath('/posts');
+  return { success: true, id: result.insertId };
+}
+
+// ❌ INCORRECT - Direct database mutation in component
+export function PostForm() {
+  const handleSubmit = async () => {
+    await db.insert(posts).values(data); // Don't do this
+  };
+}
+```
+
+### 3. Data Validation - Zod Schemas Required
+
+**ALL data validation must be performed using Zod schemas.**
+
+- Define Zod schemas for all data structures
+- Validate all input data before processing
+- Use Zod schemas to generate TypeScript types
+- Place validation schemas in dedicated schema files
+
+```tsx
+// ✅ CORRECT - Zod validation
+import { z } from 'zod';
+
+const createPostSchema = z.object({
+  title: z.string().min(1).max(200),
+  content: z.string().min(10),
+  authorId: z.string().uuid(),
+  published: z.boolean().default(false)
+});
+
+type CreatePostInput = z.infer<typeof createPostSchema>;
+
+export async function createPost(data: CreatePostInput) {
+  const validatedData = createPostSchema.parse(data); // Always validate
+  // ... rest of function
+}
+
+// ❌ INCORRECT - No validation
+export async function createPost(data: any) {
+  await db.insert(posts).values(data); // No validation
+}
+```
+
+### 4. Server Action Input Types - Strict TypeScript Types
+
+**Server Actions must receive properly typed data, NOT FormData.**
+
+- Define explicit TypeScript interfaces/types for all Server Action parameters
+- Use Zod schema inference for type generation
+- Never use `FormData` as the parameter type
+- Extract and validate form data before passing to Server Actions
+
+```tsx
+// ✅ CORRECT - Typed Server Action parameters
+type UpdateUserInput = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+export async function updateUser(data: UpdateUserInput) {
+  const validatedData = updateUserSchema.parse(data);
+  // ... rest of function
+}
+
+// Client-side form handling
+export function UserForm({ user }: { user: User }) {
+  const handleSubmit = async (formData: FormData) => {
+    const data: UpdateUserInput = {
+      id: user.id,
+      name: formData.get('name') as string,
+      email: formData.get('email') as string,
+    };
+    
+    await updateUser(data); // Pass typed object
+  };
+}
+
+// ❌ INCORRECT - FormData as parameter type
+export async function updateUser(formData: FormData) {
+  const name = formData.get('name'); // Untyped
+  // ... rest of function
+}
+```
+
+## File Organization
+
+- **Database schemas**: [src/db/schema.ts](mdc:src/db/schema.ts)
+- **Validation schemas**: Create dedicated files for Zod schemas (e.g., `src/lib/validations/`)
+- **Server Actions**: Create in `src/lib/actions/` or co-locate with relevant components
+- **Database utilities**: [src/db/index.ts](mdc:src/db/index.ts)
+
+## Integration with Database
+
+When working with the database configuration in [src/db/](mdc:src/db/):
+
+- Import database instance from [src/db/index.ts](mdc:src/db/index.ts)
+- Reference schema definitions from [src/db/schema.ts](mdc:src/db/schema.ts)
+- Use Drizzle ORM patterns as configured in [drizzle.config.ts](mdc:drizzle.config.ts)
+
+## Error Handling
+
+Always implement proper error handling in Server Actions:
+
+```tsx
+export async function createPost(data: CreatePostInput) {
+  try {
+    const validatedData = createPostSchema.parse(data);
+    const result = await db.insert(posts).values(validatedData);
+    
+    revalidatePath('/posts');
+    return { success: true, data: result };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return { success: false, error: 'Validation failed', details: error.errors };
+    }
+    
+    console.error('Failed to create post:', error);
+    return { success: false, error: 'Failed to create post' };
+  }
+}
+```
+
+## Summary
+
+1. **Server Components** → Data fetching
+2. **Server Actions** → Data mutations  
+3. **Zod** → Data validation
+4. **TypeScript types** → Strongly typed Server Action parameters
+
+Following these patterns ensures type safety, proper separation of concerns, and optimal performance in your Next.js application.

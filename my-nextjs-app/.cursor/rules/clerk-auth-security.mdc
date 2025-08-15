@@ -1,0 +1,382 @@
+---
+alwaysApply: true
+description: "Enforces Clerk authentication patterns and ensures users can only access their own data"
+---
+
+# Clerk Authentication & Authorization Security Rule
+
+This project uses **Clerk** for authentication and authorization. **CRITICAL**: Users must NEVER be able to access data that doesn't belong to them. All database operations must be filtered by the authenticated user's ID.
+
+## Core Security Principle
+
+**Every database query that accesses user data MUST include user filtering.** No exceptions.
+
+## Required Imports for Auth
+
+```typescript
+import { auth, currentUser } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+```
+
+## Authentication Patterns
+
+### Server Components & API Routes
+
+```typescript
+import { auth } from "@clerk/nextjs/server";
+
+// ✅ ALWAYS get userId first and validate
+export async function GET() {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  
+  // Now use userId for database queries
+  const userDecks = await db.select()
+    .from(decksTable)
+    .where(eq(decksTable.userId, userId)); // CRITICAL: Always filter by userId
+  
+  return Response.json(userDecks);
+}
+```
+
+### Server Actions
+
+```typescript
+"use server";
+
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+
+export async function createDeck(formData: FormData) {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    redirect("/sign-in");
+  }
+  
+  // Extract data and include userId
+  const deck = await db.insert(decksTable).values({
+    userId, // CRITICAL: Always include userId
+    name: formData.get("name") as string,
+    description: formData.get("description") as string,
+  }).returning();
+  
+  return deck[0];
+}
+```
+
+### Client Components
+
+```typescript
+"use client";
+
+import { useAuth, useUser } from "@clerk/nextjs";
+
+export function DecksList() {
+  const { isLoaded, userId, isSignedIn } = useAuth();
+  const { user } = useUser();
+  
+  // Always check auth state
+  if (!isLoaded) return <div>Loading...</div>;
+  if (!isSignedIn) redirect("/sign-in");
+  
+  // Component logic here
+}
+```
+
+## Database Security Patterns
+
+### ✅ REQUIRED: Always Filter by User
+
+```typescript
+// ✅ Fetching user's decks
+const userDecks = await db.select()
+  .from(decksTable)
+  .where(eq(decksTable.userId, userId));
+
+// ✅ Fetching specific deck (with user verification)
+const deck = await db.select()
+  .from(decksTable)
+  .where(and(
+    eq(decksTable.id, deckId),
+    eq(decksTable.userId, userId) // CRITICAL: Always verify ownership
+  ));
+
+// ✅ Fetching cards for user's deck
+const userCards = await db.select()
+  .from(cardsTable)
+  .innerJoin(decksTable, eq(cardsTable.deckId, decksTable.id))
+  .where(eq(decksTable.userId, userId));
+
+// ✅ Updating user's deck
+await db.update(decksTable)
+  .set({ name: "Updated Name" })
+  .where(and(
+    eq(decksTable.id, deckId),
+    eq(decksTable.userId, userId) // CRITICAL: Verify ownership before update
+  ));
+
+// ✅ Deleting user's card
+await db.delete(cardsTable)
+  .where(and(
+    eq(cardsTable.id, cardId),
+    // Verify the card belongs to user's deck
+    exists(
+      db.select()
+        .from(decksTable)
+        .where(and(
+          eq(decksTable.id, cardsTable.deckId),
+          eq(decksTable.userId, userId)
+        ))
+    )
+  ));
+```
+
+### ❌ FORBIDDEN: Never Query Without User Filter
+
+```typescript
+// ❌ NEVER fetch all decks without user filter
+const allDecks = await db.select().from(decksTable);
+
+// ❌ NEVER fetch by ID alone without user verification
+const deck = await db.select().from(decksTable).where(eq(decksTable.id, deckId));
+
+// ❌ NEVER trust client-provided userId
+const userDecks = await db.select()
+  .from(decksTable)
+  .where(eq(decksTable.userId, req.body.userId)); // DANGEROUS!
+
+// ❌ NEVER update without user verification
+await db.update(decksTable)
+  .set({ name: "Hacked" })
+  .where(eq(decksTable.id, deckId)); // DANGEROUS!
+```
+
+## API Route Security
+
+### Protected API Routes Pattern
+
+```typescript
+// app/api/decks/route.ts
+import { auth } from "@clerk/nextjs/server";
+import { db } from "@/db/index";
+import { decksTable } from "@/db/schema";
+import { eq } from "drizzle-orm";
+
+export async function GET() {
+  try {
+    const { userId } = await auth();
+    
+    if (!userId) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    
+    const decks = await db.select()
+      .from(decksTable)
+      .where(eq(decksTable.userId, userId));
+    
+    return Response.json(decks);
+  } catch (error) {
+    console.error("API Error:", error);
+    return new Response("Internal Server Error", { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const { userId } = await auth();
+    
+    if (!userId) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    
+    const body = await request.json();
+    
+    const newDeck = await db.insert(decksTable).values({
+      userId, // CRITICAL: Use authenticated userId, not from request body
+      name: body.name,
+      description: body.description,
+    }).returning();
+    
+    return Response.json(newDeck[0]);
+  } catch (error) {
+    console.error("API Error:", error);
+    return new Response("Internal Server Error", { status: 500 });
+  }
+}
+```
+
+### Resource-Specific API Routes
+
+```typescript
+// app/api/decks/[deckId]/route.ts
+export async function GET(
+  request: Request,
+  { params }: { params: { deckId: string } }
+) {
+  try {
+    const { userId } = await auth();
+    
+    if (!userId) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    
+    const deckId = parseInt(params.deckId);
+    
+    const deck = await db.select()
+      .from(decksTable)
+      .where(and(
+        eq(decksTable.id, deckId),
+        eq(decksTable.userId, userId) // CRITICAL: Verify ownership
+      ));
+    
+    if (deck.length === 0) {
+      return new Response("Deck not found", { status: 404 });
+    }
+    
+    return Response.json(deck[0]);
+  } catch (error) {
+    console.error("API Error:", error);
+    return new Response("Internal Server Error", { status: 500 });
+  }
+}
+```
+
+## Page Protection Patterns
+
+### Server Pages
+
+```typescript
+// app/dashboard/page.tsx
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+
+export default async function DashboardPage() {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    redirect("/sign-in");
+  }
+  
+  // Fetch user-specific data
+  const userDecks = await db.select()
+    .from(decksTable)
+    .where(eq(decksTable.userId, userId));
+  
+  return (
+    <div>
+      <h1>Your Decks</h1>
+      {/* Render user decks */}
+    </div>
+  );
+}
+```
+
+### Client Pages with Auth Check
+
+```typescript
+"use client";
+
+import { useAuth } from "@clerk/nextjs";
+import { redirect } from "next/navigation";
+import { useEffect } from "react";
+
+export default function ClientPage() {
+  const { isLoaded, isSignedIn } = useAuth();
+  
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      redirect("/sign-in");
+    }
+  }, [isLoaded, isSignedIn]);
+  
+  if (!isLoaded) return <div>Loading...</div>;
+  if (!isSignedIn) return null;
+  
+  return <div>Protected content</div>;
+}
+```
+
+## Error Handling & Security
+
+### Proper Error Messages
+
+```typescript
+// ✅ Don't reveal if resource exists for other users
+if (deck.length === 0) {
+  return new Response("Deck not found", { status: 404 });
+}
+
+// ✅ Generic error for security
+catch (error) {
+  console.error("Database error:", error); // Log detailed error
+  return new Response("Internal Server Error", { status: 500 }); // Generic public error
+}
+```
+
+## Helper Functions
+
+Create reusable auth helpers:
+
+```typescript
+// lib/auth-helpers.ts
+import { auth } from "@clerk/nextjs/server";
+
+export async function requireAuth() {
+  const { userId } = await auth();
+  
+  if (!userId) {
+    throw new Error("Unauthorized");
+  }
+  
+  return userId;
+}
+
+export async function verifyDeckOwnership(deckId: number, userId: string) {
+  const deck = await db.select()
+    .from(decksTable)
+    .where(and(
+      eq(decksTable.id, deckId),
+      eq(decksTable.userId, userId)
+    ));
+    
+  if (deck.length === 0) {
+    throw new Error("Deck not found or access denied");
+  }
+  
+  return deck[0];
+}
+```
+
+## Security Checklist
+
+For EVERY database operation that accesses user data:
+
+- [ ] ✅ Get `userId` from `auth()` or `useAuth()`
+- [ ] ✅ Validate user is authenticated
+- [ ] ✅ Filter queries by `userId` or verify ownership
+- [ ] ✅ Never trust client-provided user IDs
+- [ ] ✅ Use generic error messages for security
+- [ ] ✅ Log detailed errors server-side only
+
+## Critical Rules
+
+1. **NEVER** fetch data without user filtering
+2. **ALWAYS** verify resource ownership before operations
+3. **NEVER** trust user IDs from client requests
+4. **ALWAYS** use server-side auth checks for sensitive operations
+5. **NEVER** expose other users' data, even in error messages
+
+## File-Specific Guidance
+
+- **API Routes** (`app/api/**`): Always use `auth()` and filter by `userId`
+- **Server Components**: Use `auth()` for authentication checks
+- **Client Components**: Use `useAuth()` and `useUser()` hooks
+- **Server Actions**: Use `auth()` and validate ownership
+- **Database Queries**: Always include user filtering in WHERE clauses
+- **Middleware**: [middleware.ts](mdc:src/middleware.ts) handles initial auth routing
+
+This rule is **CRITICAL** for application security. Any deviation from these patterns could lead to data breaches.
