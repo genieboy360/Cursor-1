@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Poppins } from "next/font/google";
+import Link from "next/link";
 import {
   SignInButton,
   SignUpButton,
@@ -38,7 +39,21 @@ export default function RootLayout({
         >
           <ClerkProviderWrapper>
             <header className="flex justify-between items-center p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-              <h1 className="text-xl font-semibold">My Next.js App</h1>
+              <div className="flex items-center gap-6">
+                <h1 className="text-xl font-semibold">
+                  <Link href="/">Zulfi Cards</Link>
+                </h1>
+                <SignedIn>
+                  <nav className="flex items-center gap-4">
+                    <Link 
+                      href="/dashboard" 
+                      className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Dashboard
+                    </Link>
+                  </nav>
+                </SignedIn>
+              </div>
               <div className="flex items-center gap-4">
                 <ThemeToggle />
                 <SignedOut>
